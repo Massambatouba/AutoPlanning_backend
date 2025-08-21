@@ -53,7 +53,7 @@ public class PlanningController {
     /* 2. Planning d’un site                                              */
     /* ------------------------------------------------------------------ */
     @GetMapping("/site/{siteId}")
-    public ResponseEntity<SitePlanningDTO> getSitePlanning(
+    public ResponseEntity<sitePlanningDTO> getSitePlanning(
             @PathVariable Long siteId,
             @RequestParam @Min(1) @Max(12) int month,
             @RequestParam                int year) {

@@ -285,11 +285,24 @@ public class EmployeeService {
     /* ====================================================================== */
 
     /** Charge l’entité (sécurisé entreprise) */
+    @Transactional(readOnly = true)
+
     private Employee loadEntity(Long id) {
-        Company company = auth.getCurrentUser().getCompany();
+        User current = auth.getCurrentUser();
+
+        // ► Compte technique : pas de filtrage par société
+        if (current.getCompany() == null) {
+            // on charge l’employé quel que soit son company_id
+            return employeeRepo.findById(id)
+                    .orElseThrow(() -> new EntityNotFoundException("Employé introuvable"));
+        }
+
+        // ► Compte « normal » : filtrage strict
+        Long companyId = current.getCompany().getId();
         return employeeRepo.findById(id)
-                .filter(e -> e.getCompany().getId().equals(company.getId()))
+                .filter(e -> e.getCompany().getId().equals(companyId))
                 .orElseThrow(() -> new EntityNotFoundException("Employé introuvable"));
     }
+
 
 }

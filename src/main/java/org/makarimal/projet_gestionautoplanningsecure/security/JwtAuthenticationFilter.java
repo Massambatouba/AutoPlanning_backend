@@ -18,9 +18,10 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
+// src/main/java/.../security/JwtAuthenticationFilter.java
+@Component
+@RequiredArgsConstructor
 @Slf4j
-@Component               // ➜ déclarée une seule fois ; on ne crée PAS un second bean ailleurs
-@RequiredArgsConstructor // ➜ injection par constructeur ; pas besoin de @Autowired
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
@@ -30,56 +31,70 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(
             @NonNull HttpServletRequest request,
             @NonNull HttpServletResponse response,
-            @NonNull FilterChain filterChain
-    ) throws ServletException, IOException {
-        String path = request.getRequestURI();
-        log.info("➡️  JwtFilter déclenché pour {}", path);
+            @NonNull FilterChain filterChain) throws ServletException, IOException {
 
-        // Endpoints publics : on ne touche pas au header JWT
-        if (isPublicEndpoint(request)) {
-            log.info("⏭️  Endpoint public → on ne traite pas le JWT");
+        String path = normalizedPath(request);  // <-- on enlève le context-path (/api)
+        log.debug("[JWT] path={}", path);
+
+        // ⛔ NE PAS exclure /schedules/.../send
+        if (isPublicEndpoint(path)) {
+            log.debug("[JWT] public endpoint -> pass-through");
             filterChain.doFilter(request, response);
             return;
         }
 
         final String authHeader = request.getHeader("Authorization");
-        log.info("🔎 Authorization header = {}", authHeader);
+        log.debug("[JWT] Authorization={}", authHeader);
+
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            log.info("⏭️  Pas de Bearer → on continue la chaîne sans authentifier");
-            log.debug("Authorization header absent ou mal formé : {}", authHeader);
+            log.debug("[JWT] no/bad bearer -> continue without auth");
             filterChain.doFilter(request, response);
             return;
         }
 
-        final String jwt = authHeader.substring(7);   // « Bearer « + espace = 7 »
+        final String jwt = authHeader.substring(7);
         String userEmail;
         try {
             userEmail = jwtService.extractUsername(jwt);
-            log.info("📧 Username extrait du token = {}", userEmail);
-        } catch (Exception ex) {          // signature, expiration, format, …
-            log.debug("JWT invalide : {}", ex.getMessage());
+            log.debug("[JWT] username={}", userEmail);
+        } catch (Exception ex) {
+            log.warn("[JWT] token invalid: {}", ex.getMessage());
             filterChain.doFilter(request, response);
             return;
         }
 
-        // Si aucun autre filtre n’a déjà authentifié l’utilisateur
         if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             UserDetails userDetails = userDetailsService.loadUserByUsername(userEmail);
             if (jwtService.isTokenValid(jwt, userDetails)) {
                 UsernamePasswordAuthenticationToken auth =
-                        new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                        new UsernamePasswordAuthenticationToken(
+                                userDetails, null, userDetails.getAuthorities());
                 auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(auth);
-                log.debug("Authentication posée pour {}", userEmail);
+                log.debug("[JWT] Authentication set for {}", userEmail);
             } else {
-                log.debug("JWT signature/claims invalides pour {}", userEmail);
+                log.debug("[JWT] token not valid for {}", userEmail);
             }
         }
 
         filterChain.doFilter(request, response);
     }
 
-    private boolean isPublicEndpoint(HttpServletRequest request) {
-        return request.getRequestURI().startsWith("/auth");
+    /** Retire le context-path (ex: /api) du chemin. */
+    private String normalizedPath(HttpServletRequest request) {
+        String path = request.getRequestURI();       // ex: /api/schedules/9/send
+        String ctx  = request.getContextPath();      // ex: /api
+        if (ctx != null && !ctx.isEmpty() && path.startsWith(ctx)) {
+            path = path.substring(ctx.length());     // -> /schedules/9/send
+        }
+        return path;
+    }
+
+    /** Uniquement les vraies routes publiques. */
+    private boolean isPublicEndpoint(String path) {
+        return path.startsWith("/auth")
+                || path.equals("/actuator/health")
+                || path.startsWith("/v3/api-docs")
+                || path.startsWith("/swagger-ui");
     }
 }

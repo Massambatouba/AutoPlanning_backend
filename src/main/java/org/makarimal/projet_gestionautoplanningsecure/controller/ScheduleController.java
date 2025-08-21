@@ -7,13 +7,17 @@ import org.makarimal.projet_gestionautoplanningsecure.dto.*;
 import org.makarimal.projet_gestionautoplanningsecure.model.*;
 import org.makarimal.projet_gestionautoplanningsecure.repository.ScheduleAssignmentRepository;
 import org.makarimal.projet_gestionautoplanningsecure.service.AssignmentGenerator;
+import org.makarimal.projet_gestionautoplanningsecure.service.PlanningSendService;
 import org.makarimal.projet_gestionautoplanningsecure.service.ScheduleGeneratorService;
 import org.makarimal.projet_gestionautoplanningsecure.service.ScheduleService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.async.DeferredResult;
 
 import java.io.IOException;
+import java.nio.file.AccessDeniedException;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -28,6 +32,7 @@ public class ScheduleController {
     private final AssignmentGenerator generator;
     private final ScheduleAssignmentRepository assignmentRepository;
     private final ScheduleGeneratorService scheduleGeneratorService;
+    private final PlanningSendService planningSendService;
 
 
 
@@ -36,7 +41,7 @@ public class ScheduleController {
             @AuthenticationPrincipal User user,
             @RequestParam Long siteId,
             @RequestParam Integer month,
-            @RequestParam Integer year) {
+            @RequestParam Integer year) throws AccessDeniedException {
 
         Schedule schedule = scheduleGeneratorService
                 .generateSchedule(
@@ -49,6 +54,7 @@ public class ScheduleController {
     }
 
 
+
     /* ------------------------------------------------------------------ */
     /*  1.  Création / rafraîchissement d’un planning                     */
     /* ------------------------------------------------------------------ */
@@ -56,10 +62,10 @@ public class ScheduleController {
     @PostMapping
     public ResponseEntity<Schedule> createOrRefresh(
             @AuthenticationPrincipal User user,
-            @Valid @RequestBody ScheduleRequest request) {
+            @Valid @RequestBody ScheduleRequest request) throws AccessDeniedException {
 
         Schedule schedule =
-                scheduleService.createOrRefresh(user.getCompany().getId(), request);
+                scheduleService.createOrRefresh(user, user.getCompany().getId(), request);
 
         return ResponseEntity.ok(schedule);
     }
@@ -69,8 +75,8 @@ public class ScheduleController {
             @AuthenticationPrincipal User user,
             @PathVariable Long id,
             @Valid @RequestBody ScheduleRequest request
-    ) {
-        Schedule schedule = scheduleService.updateSchedule(user.getCompany().getId(), id, request);
+    ) throws AccessDeniedException {
+        Schedule schedule = scheduleService.updateSchedule(user, user.getCompany().getId(), id, request);
         return ResponseEntity.ok(schedule);
     }
 
@@ -96,7 +102,7 @@ public class ScheduleController {
         Schedule schedule = scheduleService.getSchedule(user.getCompany().getId(), id);
         List<ScheduleAssignment> assigns = assignmentRepository.findByScheduleId(id);
 
-        return ResponseEntity.ok(scheduleService.toDto(schedule, assigns));
+        return ResponseEntity.ok(scheduleService.toDto(user, schedule, assigns));
     }
 
     /*  Liste filtrée                                                     */
@@ -108,17 +114,12 @@ public class ScheduleController {
             @RequestParam(required = false) Integer year,
             @RequestParam(required = false) Boolean published) {
 
-        List<Schedule> list = scheduleService.getSchedulesByFilters(
-                user.getCompany().getId(), siteId, month, year, published);
-
-        List<ScheduleResponse> dtos = list.stream()
-                .map(schedule -> {
-                    List<ScheduleAssignment> assigns = assignmentRepository.findByScheduleId(schedule.getId());
-                    return scheduleService.toDto(schedule, assigns);
-                }).toList();
+        List<ScheduleResponse> dtos = scheduleService.getSchedulesByFilters(
+                user, user.getCompany().getId(), siteId, month, year, published);
 
         return ResponseEntity.ok(dtos);
     }
+
 
     /* ------------------------------------------------------------------ */
     /*  4.  Publication / envoi                                           */
@@ -127,12 +128,12 @@ public class ScheduleController {
     @PostMapping("/{id}/publish")
     public ResponseEntity<ScheduleResponse> publishSchedule(
             @AuthenticationPrincipal User user,
-            @PathVariable Long id) {
+            @PathVariable Long id) throws AccessDeniedException {
 
-        Schedule updated = scheduleService.publishSchedule(user.getCompany().getId(), id);
+        Schedule updated = scheduleService.publishSchedule(user, user.getCompany().getId(), id);
         List<ScheduleAssignment> assigns = assignmentRepository.findByScheduleId(updated.getId());
 
-        return ResponseEntity.ok(scheduleService.toDto(updated, assigns));
+        return ResponseEntity.ok(scheduleService.toDto(user, updated, assigns));
     }
 
 
@@ -145,9 +146,9 @@ public class ScheduleController {
     public ResponseEntity<AssignmentDTO> addAssignment(
             @AuthenticationPrincipal User user,
             @PathVariable("id") Long scheduleId,
-            @Valid @RequestBody ScheduleAssignmentRequest request) {
+            @Valid @RequestBody ScheduleAssignmentRequest request) throws AccessDeniedException {
 
-        ScheduleAssignment a = scheduleService.addAssignment(
+        ScheduleAssignment a = scheduleService.addAssignment(user,
                 user.getCompany().getId(), scheduleId, request);
 
         return ResponseEntity.ok(AssignmentDTO.of(a));
@@ -156,10 +157,11 @@ public class ScheduleController {
 
     @PutMapping("/assignments/{id}")
     public ResponseEntity<AssignmentDTO> updateAssignment(
+            @AuthenticationPrincipal User me,
             @PathVariable Long id,
-            @Valid @RequestBody ScheduleAssignmentRequest request) {
+            @Valid @RequestBody ScheduleAssignmentRequest request) throws AccessDeniedException {
 
-        ScheduleAssignment updated = scheduleService.updateAssignment(id, request);
+        ScheduleAssignment updated = scheduleService.updateAssignment(me,id, request);
         return ResponseEntity.ok(AssignmentDTO.of(updated));
     }
 
@@ -178,36 +180,23 @@ public class ScheduleController {
     @PostMapping("/{id}/validate")
     public ResponseEntity<ScheduleResponse> validate(
             @AuthenticationPrincipal User user,
-            @PathVariable Long id) {
+            @PathVariable Long id) throws AccessDeniedException {
 
-        Schedule updated = scheduleService.validateSchedule(user.getCompany().getId(), id);
+        Schedule updated = scheduleService.validateSchedule(user, user.getCompany().getId(), id);
         List<ScheduleAssignment> assigns = assignmentRepository.findByScheduleId(updated.getId());
 
-        return ResponseEntity.ok(scheduleService.toDto(updated, assigns));
+        return ResponseEntity.ok(scheduleService.toDto(user, updated, assigns));
     }
-
-
-    @PostMapping("/{id}/send")
-    public ResponseEntity<ScheduleResponse> sendSchedule(
-            @AuthenticationPrincipal User user,
-            @PathVariable Long id) {
-
-        Schedule updated = scheduleService.sendSchedule(user.getCompany().getId(), id);
-        List<ScheduleAssignment> assigns = assignmentRepository.findByScheduleId(updated.getId());
-
-        return ResponseEntity.ok(scheduleService.toDto(updated, assigns));
-    }
-
 
 
     @DeleteMapping("/{scheduleId}/assignments/{assignmentId}")
     public ResponseEntity<Void> deleteAssignment(
             @AuthenticationPrincipal User user,
             @PathVariable Long scheduleId,
-            @PathVariable Long assignmentId) {
+            @PathVariable Long assignmentId) throws AccessDeniedException {
 
         scheduleService.deleteAssignment(
-                user.getCompany().getId(), scheduleId, assignmentId);
+                user, user.getCompany().getId(), scheduleId, assignmentId);
 
         return ResponseEntity.noContent().build();
     }
@@ -244,4 +233,54 @@ public class ScheduleController {
 
         return ResponseEntity.ok(result);
     }
+
+   /* @PostMapping("/{id}/send")
+    public ResponseEntity<Void> sendAll(@AuthenticationPrincipal User user,
+                                        @PathVariable Long id) {
+        planningSendService.sendAll(id);
+        return ResponseEntity.ok().build();
+    }
+
+    */
+
+    @PostMapping("/{id}/send")
+    public DeferredResult<SendReport> sendAll(@PathVariable Long id) {
+
+        DeferredResult<SendReport> out = new DeferredResult<>();
+
+        planningSendService.sendAllAsync(id)
+                .thenAccept(out::setResult)
+                .exceptionally(ex -> {
+                    out.setErrorResult(
+                            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                                    .body(ex.getMessage()));
+                    return null;
+                });
+
+        return out;
+    }
+
+
+    /*@PostMapping("/{id}/send")
+    public ResponseEntity<ScheduleResponse> sendSchedule(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long id) {
+
+        Schedule updated = scheduleService.sendSchedule(user.getCompany().getId(), id);
+        List<ScheduleAssignment> assigns = assignmentRepository.findByScheduleId(updated.getId());
+
+        return ResponseEntity.ok(scheduleService.toDto(updated, assigns));
+    }
+
+     */
+
+
+    @PostMapping("/{id}/send/{employeeId}")
+    public ResponseEntity<Void> sendOne(@PathVariable Long id,
+                                        @PathVariable Long employeeId){
+        planningSendService.send(id, employeeId);
+        return ResponseEntity.ok().build();
+    }
+
+
 }

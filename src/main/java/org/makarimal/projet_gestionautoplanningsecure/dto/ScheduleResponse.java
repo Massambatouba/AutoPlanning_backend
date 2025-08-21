@@ -3,10 +3,7 @@ package org.makarimal.projet_gestionautoplanningsecure.dto;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -30,6 +27,8 @@ public class ScheduleResponse {
 
     private SiteInfo site;
     private CompanyInfo company;
+    private boolean canEdit;
+    private Permissions permissions;
 
     private List<AssignmentDTO> assignments;
 
@@ -57,4 +56,14 @@ public class ScheduleResponse {
         private String phone;
         private String website;
     }
+
+    @Builder @Getter
+    @Setter
+    public static class Permissions {
+        private boolean edit;
+        private boolean generate;
+        private boolean publish;
+        private boolean send;
+    }
+
 }

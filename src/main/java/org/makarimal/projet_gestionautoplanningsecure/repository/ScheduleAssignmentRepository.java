@@ -69,4 +69,5 @@ public interface ScheduleAssignmentRepository
     List<ScheduleAssignment> findByEmployeeIdAndDate(Long employeeId, LocalDate date);
 
 
+    List<ScheduleAssignment> findByScheduleIdAndEmployeeId(Long scheduleId, Long employeeId);
 }

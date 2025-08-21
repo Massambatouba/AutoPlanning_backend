@@ -16,7 +16,7 @@ import java.util.Map;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class SitePlanningDTO {
+public class sitePlanningDTO {
 
     private Long   siteId;
     private String siteName;

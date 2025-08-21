@@ -3,6 +3,7 @@ package org.makarimal.projet_gestionautoplanningsecure.controller;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.makarimal.projet_gestionautoplanningsecure.dto.CreateCompanyRequest;
+import org.makarimal.projet_gestionautoplanningsecure.dto.UpdateCompanyRequest;
 import org.makarimal.projet_gestionautoplanningsecure.model.Company;
 import org.makarimal.projet_gestionautoplanningsecure.model.User;
 import org.makarimal.projet_gestionautoplanningsecure.repository.SiteRepository;
@@ -65,14 +66,16 @@ public class CompanyController {
         return ResponseEntity.ok(company);
     }
 
-
+/*
     @PutMapping("/{id}")
-    public ResponseEntity<Company> updateCompany(
+    public ResponseEntity<UpdateCompanyRequest> updateCompany(
             @PathVariable Long id,
-            @Valid @RequestBody Company request
+            @Valid @RequestBody UpdateCompanyRequest request
     ) {
         return ResponseEntity.ok(companyAdminService.updateCompany(id, request));
     }
+
+ */
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteCompany(@PathVariable Long id) {

@@ -25,7 +25,12 @@ public interface SiteRepository extends JpaRepository<Site, Long> {
             @Param("active") Boolean active
     );
 
+
     Optional<Site> findByIdAndCompanyId(Long siteId, Long companyId);
 
     List<Site> findAllByCompanyId(Long companyId);
+
+    long countByCompany_Id(Long cid);
+
+    List<Long> findIdsByCompanyId(Long companyId);
 }

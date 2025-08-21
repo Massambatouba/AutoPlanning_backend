@@ -10,9 +10,11 @@ import org.makarimal.projet_gestionautoplanningsecure.repository.AbsenceReposito
 import org.makarimal.projet_gestionautoplanningsecure.repository.EmployeeAbsenceRepository;
 import org.makarimal.projet_gestionautoplanningsecure.repository.ScheduleAssignmentRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.file.AccessDeniedException;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -40,9 +42,12 @@ public class ScheduleGeneratorService {
     private final EmployeeAbsenceRepository absenceRepository;
 
     @Transactional
-    public Schedule generateSchedule(Long companyId, Long siteId, int month, int year) {
+    public Schedule generateSchedule(Long companyId, Long siteId, int month, int year) throws AccessDeniedException {
         // Vérifier que le site existe et appartient à l'entreprise
         SiteResponse site = siteService.getSite(companyId, siteId);
+
+        User me = (User) SecurityContextHolder.getContext()
+                .getAuthentication().getPrincipal();
 
         // Récupérer les règles hebdomadaires et les vacations du site
         List<WeeklyScheduleRule> siteRules = siteRuleService.getWeeklyScheduleRules(companyId, siteId);
@@ -53,7 +58,7 @@ public class ScheduleGeneratorService {
         }
 
         // Créer le planning mensuel
-        Schedule schedule = scheduleService.createOrRefresh(companyId, new ScheduleRequest(
+        Schedule schedule = scheduleService.createOrRefresh(me, companyId, new ScheduleRequest(
                 site.getName() + " - " + month + "/" + year,
                 siteId,
                 month,

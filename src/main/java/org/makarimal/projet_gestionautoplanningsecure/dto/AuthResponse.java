@@ -19,6 +19,7 @@ public class AuthResponse {
     private String token;
     private User user;
     private Company company;
+    private boolean mustChangePassword;
     public List<String> getRoles() {
         // Sécurité : éviter l'appel à .stream() sur null
         if (user == null || user.getRoles() == null) {

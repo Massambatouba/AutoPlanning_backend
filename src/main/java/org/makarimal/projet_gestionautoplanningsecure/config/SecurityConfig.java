@@ -53,6 +53,13 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/swagger-ui.html"
                         ).permitAll()
+                        .requestMatchers("/platform-admin/**").hasRole("SUPER_ADMIN")
+                        .requestMatchers(
+                                "/auth/login", "/auth/register",
+                                "/auth/forgot-password", "/auth/reset-password")
+                        .permitAll()
+                        .requestMatchers(HttpMethod.POST ,"/schedules/*/send", "/schedules/*/send/**")
+                        .hasAnyRole("SUPER_ADMIN","ADMIN","SITE_ADMIN")
                         // Tout le reste nécessite un JWT valide
                         .anyRequest().authenticated())
 

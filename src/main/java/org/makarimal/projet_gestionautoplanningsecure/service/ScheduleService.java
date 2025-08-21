@@ -2,21 +2,19 @@ package org.makarimal.projet_gestionautoplanningsecure.service;
 
 import jakarta.mail.MessagingException;
 import jakarta.persistence.EntityNotFoundException;
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.makarimal.projet_gestionautoplanningsecure.dto.AssignmentDTO;
-import org.makarimal.projet_gestionautoplanningsecure.dto.ScheduleAssignmentRequest;
-import org.makarimal.projet_gestionautoplanningsecure.dto.ScheduleRequest;
-import org.makarimal.projet_gestionautoplanningsecure.dto.ScheduleResponse;
+import org.makarimal.projet_gestionautoplanningsecure.dto.*;
 import org.makarimal.projet_gestionautoplanningsecure.model.*;
 import org.makarimal.projet_gestionautoplanningsecure.repository.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.file.AccessDeniedException;
 import java.time.*;
 import java.util.List;
 import java.util.Map;
@@ -33,17 +31,27 @@ public class ScheduleService {
     private final SiteRepository siteRepository;
     private final MailService mailService;
     private final PlanningPdfService planningPdfService;
-    private final EmployeeAbsenceRepository absenceRepository;
 
-    /* ===============================================================
-       CREATE  ▸ ou ▸  REFRESH  (si déjà un schedule même clé unique)
-       =============================================================== */
+    private final EmployeeAbsenceRepository absenceRepository;
+    private final NotificationService  notificationService;
+    private final UserRepository userRepository;
+
+
+
+    private void assertCanManage(User actor, Long siteId) throws AccessDeniedException {
+        User u = userRepository.findByIdWithSites(actor.getId())
+                .orElseThrow(() -> new IllegalStateException("Utilisateur introuvable"));
+        if (!u.canAccessSite(siteId)) {
+            throw new AccessDeniedException("Vous n’avez pas le droit de gérer ce site");
+        }
+    }
 /* ===============================================================
    CREATE  ▸ ou ▸  REFRESH
    =============================================================== */
     @Transactional
-    public Schedule createOrRefresh(Long companyId, ScheduleRequest req) {
+    public Schedule createOrRefresh(User actor, Long companyId, ScheduleRequest req) throws AccessDeniedException {
 
+        assertCanManage(actor, req.getSiteId());
         /* -------- Sécurité -------- */
         Company company = companyRepository.findById(companyId)
                 .orElseThrow(() -> new EntityNotFoundException("Company not found"));
@@ -63,7 +71,7 @@ public class ScheduleService {
 
             // suppression des vieilles affectations
             List<ScheduleAssignment> old =
-                    assignmentRepository.findAllForCompany(companyId);
+                    assignmentRepository.findAllForCompany(schedule.getId());
             assignmentRepository.deleteAll(old);
 
             // remise à zéro des indicateurs
@@ -71,8 +79,6 @@ public class ScheduleService {
             schedule.setPublished(false);
             schedule.setSent(false);
             schedule.setSentAt(null);
-
-            /* >>>>  on remet AUSSI le nom  <<<< */
             schedule.setName( produceName(req, site) );
 
         }
@@ -101,8 +107,12 @@ public class ScheduleService {
     }
 
     @Transactional
-    public Schedule updateSchedule(Long companyId, Long scheduleId, ScheduleRequest request) {
+    public Schedule updateSchedule(User actor, Long companyId, Long scheduleId, ScheduleRequest request) throws AccessDeniedException {
+
         Schedule schedule = getSchedule(companyId, scheduleId);
+
+        assertCanManage(actor, schedule.getSite().getId());
+        assertCanManage(actor, request.getSiteId());
 
         if (schedule.isPublished()) {
             throw new IllegalStateException("Cannot update published schedule");
@@ -146,22 +156,53 @@ public class ScheduleService {
                 .orElseThrow(() -> new EntityNotFoundException("Schedule not found"));
     }
 
-
-
-    public List<Schedule> getSchedulesByFilters(Long companyId,
-                                                Long siteId,
-                                                Integer month,
-                                                Integer year,
-                                                Boolean published) {
-        // -> à implémenter (ex. via Specification / QueryDsl)
-        return scheduleRepository.findByFilters(
-                companyId,
-                siteId,
-                month,
-                year,
-                published
-        );
+    private List<Long> allowedSiteIds(User u, Long companyId) {
+        // SUPER/ADMIN global : tous les sites de l’entreprise
+        if (u.isSuperAdmin() || u.isCompanyAdminGlobal() || u.isManageAllSites()) {
+            return siteRepository.findIdsByCompanyId(companyId);
+        }
+        // SITE_ADMIN avec liste
+        return u.getManagedSites().stream().map(Site::getId).toList();
     }
+
+    private boolean canEdit(User actor, Schedule s) {
+        User u = userRepository.findByIdWithSites(actor.getId())
+                .orElseThrow();
+        return u.isSuperAdmin()
+                || u.isCompanyAdminGlobal()
+                || u.canAccessSite(s.getSite().getId());
+    }
+
+
+
+    @Transactional(readOnly = true)
+    public List<ScheduleResponse> getSchedulesByFilters(User actor,
+                                                        Long companyId,
+                                                        Long siteId,
+                                                        Integer month,
+                                                        Integer year,
+                                                        Boolean published) {
+        // 1) Recharger l’acteur (avec ses sites) et vérifier la société
+        User u = userRepository.findByIdWithSites(actor.getId()).orElseThrow();
+        if (!u.isSuperAdmin() && !u.isCompanyAdminGlobal()) {
+            // Un SITE_ADMIN ne doit voir que sa société
+            if (u.getCompany() == null || !u.getCompany().getId().equals(companyId)) {
+                throw new org.springframework.security.access.AccessDeniedException(
+                        "Accès refusé à cette entreprise");
+            }
+        }
+
+        // 2) Lecture : on ne restreint pas par sites (lecture globale dans la société)
+        List<Schedule> list = scheduleRepository.findByFilters(
+                companyId, siteId, month, year, published
+        );
+
+        // 3) Mapper en DTO + calculer canEdit pour chaque planning
+        return list.stream()
+                .map(s -> toDtoLight(actor, s)) // DTO léger, voir ci‑dessous
+                .toList();
+    }
+
 
     public List<Schedule> getSchedulesBySite(Long companyId, Long siteId) {
         if (!siteRepository.findById(siteId)
@@ -170,12 +211,6 @@ public class ScheduleService {
             throw new EntityNotFoundException("Site not found or not owned by company");
         }
         return scheduleRepository.findBySiteId(siteId);
-    }
-
-    public Schedule publishSchedule(Long companyId, Long id) {
-        Schedule s = getSchedule(companyId, id);
-        s.setPublished(true);
-        return scheduleRepository.save(s);
     }
 
     /*public Schedule sendSchedule(Long companyId, Long id) {
@@ -197,9 +232,10 @@ public class ScheduleService {
  */
 
     @Transactional
-    public ScheduleAssignment addAssignment(Long companyId,
+    public ScheduleAssignment addAssignment(User actor, Long companyId,
                                             Long scheduleId,
-                                            ScheduleAssignmentRequest req) {
+                                            ScheduleAssignmentRequest req) throws AccessDeniedException  {
+        assertCanManage(actor, req.getSiteId());
         // 1) Récupérer le planning et vérifier l’appartenance à l’entreprise
         Schedule schedule = getSchedule(companyId, scheduleId);
         if (!schedule.getCompany().getId().equals(companyId)) {
@@ -354,9 +390,14 @@ public class ScheduleService {
 
 
     @Transactional
-    public ScheduleAssignment updateAssignment(Long assignmentId, ScheduleAssignmentRequest request) {
+    public ScheduleAssignment updateAssignment(User actor, Long assignmentId, ScheduleAssignmentRequest request) throws AccessDeniedException {
         ScheduleAssignment assignment = assignmentRepository.findById(assignmentId)
                 .orElseThrow(() -> new EntityNotFoundException("Affectation non trouvée"));
+
+        /* ① droit sur l’ancien site … */
+        assertCanManage(actor, assignment.getSite().getId());
+        /* ② … et sur le nouveau site (si changé) */
+        assertCanManage(actor, request.getSiteId());
 
         assignment.setDate(request.getDate());
         assignment.setStartTime(request.getStartTime());
@@ -381,7 +422,7 @@ public class ScheduleService {
     }
 
     @Transactional
-    public void deleteAssignment(Long companyId, Long scheduleId, Long assignmentId) {
+    public void deleteAssignment(User actor, Long companyId, Long scheduleId, Long assignmentId) throws AccessDeniedException {
         // 1) Charger l’affectation
         ScheduleAssignment assignment = assignmentRepository.findById(assignmentId)
                 .orElseThrow(() -> new EntityNotFoundException("Affectation non trouvée : " + assignmentId));
@@ -393,6 +434,9 @@ public class ScheduleService {
                     "Vous n’êtes pas autorisé·e à supprimer cette affectation");
         }
 
+        /* contrôle d’autorisation */
+        assertCanManage(actor, assignment.getSite().getId());
+
         // 3) Supprimer
         assignmentRepository.delete(assignment);
     }
@@ -401,8 +445,9 @@ public class ScheduleService {
     }
 
     @Transactional
-    public Schedule validateSchedule(Long companyId, Long id) {
+    public Schedule validateSchedule(User actor, Long companyId, Long id) throws AccessDeniedException {
         Schedule s = getSchedule(companyId, id);
+        assertCanManage(actor, s.getSite().getId());
         s.setValidated(true);
         return scheduleRepository.save(s);
     }
@@ -415,9 +460,9 @@ public class ScheduleService {
 
 
     @Transactional
-    public Schedule sendSchedule(Long companyId, Long scheduleId) {
+    public Schedule sendSchedule(User actor, Long companyId, Long scheduleId) throws AccessDeniedException {
         Schedule s = getSchedule(companyId, scheduleId);
-
+        assertCanManage(actor, s.getSite().getId());
         // regrouper les assignments par employé
         Map<Long, List<ScheduleAssignment>> byEmp = assignmentRepository
                 .findByScheduleId(scheduleId)
@@ -441,36 +486,143 @@ public class ScheduleService {
         return scheduleRepository.save(s);
     }
 
-    public ScheduleResponse toDto(Schedule schedule, List<ScheduleAssignment> assignments) {
+    // 1) Builder commun (privé)
+    private ScheduleResponse.ScheduleResponseBuilder baseDto(Schedule s) {
         return ScheduleResponse.builder()
-                .id(schedule.getId())
-                .name(schedule.getName())
-                .month(schedule.getMonth())
-                .year(schedule.getYear())
-                .published(schedule.isPublished())
-                .validated(schedule.isValidated())
-                .sent(schedule.isSent())
-                .sentAt(schedule.getSentAt())
-                .completionRate(schedule.getCompletionRate())
-                .createdAt(schedule.getCreatedAt())
-                .updatedAt(schedule.getUpdatedAt())
+                .id(s.getId())
+                .name(s.getName())
+                .month(s.getMonth())
+                .year(s.getYear())
+                .published(s.isPublished())
+                .validated(s.isValidated())
+                .sent(s.isSent())
+                .sentAt(s.getSentAt())
+                .completionRate(s.getCompletionRate())
+                .createdAt(s.getCreatedAt())
+                .updatedAt(s.getUpdatedAt())
                 .site(ScheduleResponse.SiteInfo.builder()
-                        .id(schedule.getSite().getId())
-                        .name(schedule.getSite().getName())
-                        .city(schedule.getSite().getCity())
-                        .address(schedule.getSite().getAddress())
-                        .email(schedule.getSite().getEmail())
-                        .phone(schedule.getSite().getPhone())
+                        .id(s.getSite().getId())
+                        .name(s.getSite().getName())
+                        .city(s.getSite().getCity())
+                        .address(s.getSite().getAddress())
+                        .email(s.getSite().getEmail())
+                        .phone(s.getSite().getPhone())
                         .build())
                 .company(ScheduleResponse.CompanyInfo.builder()
-                        .id(schedule.getCompany().getId())
-                        .name(schedule.getCompany().getName())
-                        .email(schedule.getCompany().getEmail())
-                        .phone(schedule.getCompany().getPhone())
-                        .website(schedule.getCompany().getWebsite())
-                        .build())
-                .assignments(assignments.stream().map(AssignmentDTO::of).toList())
+                        .id(s.getCompany().getId())
+                        .name(s.getCompany().getName())
+                        .email(s.getCompany().getEmail())
+                        .phone(s.getCompany().getPhone())
+                        .website(s.getCompany().getWebsite())
+                        .build());
+    }
+
+    private ScheduleResponse.Permissions computePerms(User actor, Schedule s) {
+        boolean edit      = canEdit(actor, s);
+        boolean generate  = edit && !s.isPublished();
+        boolean publish   = edit && !s.isPublished();
+        boolean send      = edit && s.isPublished() && !s.isSent();
+        return ScheduleResponse.Permissions.builder()
+                .edit(edit)
+                .generate(generate)
+                .publish(publish)
+                .send(send)
                 .build();
+    }
+
+    // 2) Version liste (légère)
+    public ScheduleResponse toDtoLight(User actor, Schedule s) {
+        return baseDto(s)
+                .canEdit(canEdit(actor, s))
+                .permissions(computePerms(actor, s))
+                .build();
+    }
+
+    // 3) Version détail (avec affectations)
+    public ScheduleResponse toDto(User actor, Schedule s, List<ScheduleAssignment> assignments) {
+        return baseDto(s)
+                .assignments(assignments.stream().map(AssignmentDTO::of).toList())
+                .canEdit(canEdit(actor, s))
+                .permissions(computePerms(actor, s))
+                .build();
+    }
+
+
+
+    /** Renvoie le Schedule sans contrôle d’entreprise (usage interne). */
+    public Schedule getEntity(Long scheduleId) {
+        return scheduleRepository.findById(scheduleId)
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "Schedule not found, id=" + scheduleId));
+    }
+
+    /** Toutes les affectations d’un planning. */
+    public List<ScheduleAssignment> getAssignments(Long scheduleId) {
+        return assignmentRepository.findByScheduleId(scheduleId);
+    }
+
+    /** Vérifie qu’un employé appartient bien au planning et le renvoie. */
+    public Employee getEmployeeInSchedule(Long scheduleId, Long empId) {
+        return getAssignments(scheduleId).stream()
+                .map(ScheduleAssignment::getEmployee)
+                .filter(e -> e.getId().equals(empId))
+                .findFirst()
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "Employee " + empId + " not found in schedule " + scheduleId));
+    }
+
+    public EmployeePlanningDTO getEmployeePlanning(Long scheduleId, Long empId) {
+
+        Schedule sched = getEntity(scheduleId);
+
+        // Récupère toutes les affectations de cet employé
+        List<ScheduleAssignment> assigns =
+                assignmentRepository.findByScheduleIdAndEmployeeId(scheduleId, empId);
+
+        // Regrouper par date
+        Map<LocalDate, List<AssignmentDTO>> calendar = assigns.stream()
+                .map(AssignmentDTO::of)                       // ton mapper DTO
+                .collect(Collectors.groupingBy(AssignmentDTO::getDate));
+
+        Employee emp = assigns.isEmpty()
+                ? getEmployeeInSchedule(scheduleId, empId)
+                : assigns.get(0).getEmployee();
+
+        return EmployeePlanningDTO.builder()
+                .scheduleId(scheduleId)
+                .month(sched.getMonth())
+                .year(sched.getYear())
+                .employeeId(empId)
+                .employeeName(emp.getFirstName() + " " + emp.getLastName())
+                .calendar(calendar)
+                .build();
+    }
+
+
+    @Transactional(readOnly = true)
+    public Schedule getForSending(Long scheduleId) {
+        return scheduleRepository.findByIdWithSiteAndCompany(scheduleId)
+                .orElseThrow(() -> new EntityNotFoundException("Schedule not found: " + scheduleId));
+    }
+
+
+    @Transactional
+    public Schedule publishSchedule(User actor, Long companyId, Long id) throws AccessDeniedException {
+
+        Schedule s = getSchedule(companyId, id);
+        assertCanManage(actor, s.getSite().getId());
+        assertCanManage(actor, s.getSite().getId());
+        s.setPublished(true);
+        scheduleRepository.save(s);
+
+        // 2️⃣ crée une notification pour toute la société
+        notificationService.notifyCompany(
+                s.getCompany(),
+                "Le planning \"" + s.getName() + "\" a été publié",
+                "calendar-check"
+        );
+
+        return s;
     }
 
 

@@ -15,6 +15,14 @@ import java.util.Optional;
 public interface EmployeeRepository extends JpaRepository<Employee, Long> {
     List<Employee> findByCompanyId(Long companyId);
 
+    // EmployeeRepository.java
+    @Query("""
+       select e
+       from   Employee e
+       join fetch e.company
+       where  e.id = :id
+       """)
+    Optional<Employee> findWithCompanyById(@Param("id") Long id);
 
 
     //List<Employee> findByCompanyIdAndIsActive(Long companyId, boolean isActive);
@@ -69,6 +77,7 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
 """)
     List<EmployeePlanningDTO> findActiveBySite(@Param("siteId") Long siteId);
 
+    long countByCompany_Id(Long cid);
 }
 
 

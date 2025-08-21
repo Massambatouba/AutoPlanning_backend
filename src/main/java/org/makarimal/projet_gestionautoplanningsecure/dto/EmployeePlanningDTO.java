@@ -14,6 +14,8 @@ public class EmployeePlanningDTO {
 
 private Long employeeId;
 private String employeeName;
+private int    month;
+private int year;
 private Long scheduleId;
 private String responsableName;
 private Map<LocalDate, List<AssignmentDTO>> calendar;
@@ -31,5 +33,7 @@ public EmployeePlanningDTO(Long employeeId,
         this.employeeName    = employeeName;
         this.responsableName = responsableName;
 }
+
+
 }
 

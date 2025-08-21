@@ -73,7 +73,7 @@ public class PlanningQueryService {
     }
 
     /* ───────── 2. Planning d’un site ───────── */
-    public SitePlanningDTO getSitePlanning(Long siteId, int month, int year) {
+    public sitePlanningDTO getSitePlanning(Long siteId, int month, int year) {
 
         /* ①  on charge TOUTES les vacations du site pour le mois */
         List<ScheduleAssignment> vacations =
@@ -131,7 +131,7 @@ public class PlanningQueryService {
                 ? null
                 : filtered.get(0).getSite().getName();
 
-        return SitePlanningDTO.builder()
+        return sitePlanningDTO.builder()
                 .siteId(siteId)
                 .siteName(siteName)
                 .month(month)

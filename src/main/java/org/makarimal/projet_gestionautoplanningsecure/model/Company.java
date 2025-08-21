@@ -10,6 +10,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -25,7 +26,7 @@ public class Company {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @Column(length = 120, nullable = false)
     private String name;
 
     @OneToMany(mappedBy = "company", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
@@ -52,6 +53,24 @@ public class Company {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
+    @OneToMany(mappedBy = "company")
+    @JsonIgnoreProperties("company")
+    private List<User> employees;   // pour employeesCount
+
+    @Column(nullable = false, columnDefinition = "boolean default true")
+    @Builder.Default
+    private boolean active = true;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    private SubscriptionPlan subscriptionPlan;
+
+    @Column(name = "monthly_revenue", nullable = false,
+            columnDefinition = "double precision default 0")
+    @Builder.Default
+    private double monthlyRevenue = 0d;
+    private Instant lastLoginAt;
+
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
@@ -62,6 +81,7 @@ public class Company {
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
     }
+
 
 
     public enum SubscriptionStatus {
