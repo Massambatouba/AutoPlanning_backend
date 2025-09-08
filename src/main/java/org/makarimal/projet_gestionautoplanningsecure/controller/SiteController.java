@@ -49,10 +49,12 @@ public class SiteController {
         return ResponseEntity.ok(site);
     }
 
-    @GetMapping("/{siteId}/employees")
-    public ResponseEntity<List<EmployeePlanningDTO>> listSiteEmployees(
-            @PathVariable Long siteId) {
-        return ResponseEntity.ok(employeeService.getIsActiveEmployeesForSite(siteId));
+    @GetMapping("/{siteId}/employees/planning")
+    public ResponseEntity<List<EmployeePlanningDTO>> listSiteEmployees(@PathVariable Long siteId) {
+        var list = employeeService.getActiveEmployeesForSite(siteId).stream()
+                .map(EmployeePlanningDTO::of)
+                .toList();
+        return ResponseEntity.ok(list);
     }
 
     @GetMapping

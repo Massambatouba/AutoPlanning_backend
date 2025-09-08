@@ -65,6 +65,11 @@ public class PlatformAdminController {
         return planSrv.createPlan(req);
     }
 
+    @PutMapping("/subscription-plans/{id}")
+    public SubscriptionPlan updatePlan(@PathVariable Long id, @RequestBody @Valid SubscriptionPlanRequest req) {
+        return planSrv.updatePlan(id, req);
+    }
+
     /* ④ Revenus --------------------------------------------------------- */
     @GetMapping("/revenues")
     public List<RevenueData> revenues(@RequestParam(defaultValue="6") int months){

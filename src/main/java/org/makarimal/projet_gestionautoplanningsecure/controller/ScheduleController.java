@@ -6,18 +6,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.makarimal.projet_gestionautoplanningsecure.dto.*;
 import org.makarimal.projet_gestionautoplanningsecure.model.*;
 import org.makarimal.projet_gestionautoplanningsecure.repository.ScheduleAssignmentRepository;
-import org.makarimal.projet_gestionautoplanningsecure.service.AssignmentGenerator;
-import org.makarimal.projet_gestionautoplanningsecure.service.PlanningSendService;
-import org.makarimal.projet_gestionautoplanningsecure.service.ScheduleGeneratorService;
-import org.makarimal.projet_gestionautoplanningsecure.service.ScheduleService;
+import org.makarimal.projet_gestionautoplanningsecure.service.*;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.context.request.async.DeferredResult;
 
-import java.io.IOException;
 import java.nio.file.AccessDeniedException;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -33,6 +31,7 @@ public class ScheduleController {
     private final ScheduleAssignmentRepository assignmentRepository;
     private final ScheduleGeneratorService scheduleGeneratorService;
     private final PlanningSendService planningSendService;
+    private final ScheduleGenerationFacade generationFacade;
 
 
 
@@ -64,11 +63,25 @@ public class ScheduleController {
             @AuthenticationPrincipal User user,
             @Valid @RequestBody ScheduleRequest request) throws AccessDeniedException {
 
-        Schedule schedule =
-                scheduleService.createOrRefresh(user, user.getCompany().getId(), request);
+        // 🔒 garde simple côté contrôleur (en plus des validations du DTO)
+        if (request.getPeriodType() == Schedule.PeriodType.MONTH) {
+            if (request.getMonth() == null || request.getYear() == null) {
+                return ResponseEntity.badRequest().build();
+            }
+        } else if (request.getPeriodType() == Schedule.PeriodType.RANGE) {
+            if (request.getStartDate() == null || request.getEndDate() == null
+                    || request.getEndDate().isBefore(request.getStartDate())) {
+                return ResponseEntity.badRequest().build();
+            }
+        } else {
+            return ResponseEntity.badRequest().build();
+        }
 
+        Schedule schedule = scheduleService.createOrRefresh(user, user.getCompany().getId(), request);
+        // (optionnel) 201 Created + Location si tu préfères
         return ResponseEntity.ok(schedule);
     }
+
 
     @PutMapping("/{id}")
     public ResponseEntity<Schedule> updateSchedule(
@@ -85,10 +98,17 @@ public class ScheduleController {
     /* ------------------------------------------------------------------ */
 
     @PostMapping("/{id}/generate-assignments")
-    public ResponseEntity<Void> generate(@PathVariable Long id) {
-        generator.generateForSchedule(id);   // on appelle la méthode, on ignore son "résultat" (void)
-        return ResponseEntity.ok().build();  // on renvoie juste 200 OK
+    public ResponseEntity<ScheduleResponse> generateV2(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long id) throws AccessDeniedException {
+
+        Schedule s = generationFacade.regenerateV2(user, id);
+
+        var assigns = assignmentRepository.findByScheduleId(s.getId());
+        return ResponseEntity.ok(scheduleService.toDto(user, s, assigns));
     }
+
+
 
     /* ------------------------------------------------------------------ */
     /*  3.  Lecture d’un planning                                         */
@@ -103,6 +123,31 @@ public class ScheduleController {
         List<ScheduleAssignment> assigns = assignmentRepository.findByScheduleId(id);
 
         return ResponseEntity.ok(scheduleService.toDto(user, schedule, assigns));
+    }
+
+    @PostMapping("/generate-range")
+    public ResponseEntity<Schedule> generateRange(
+            @AuthenticationPrincipal User user,
+            @RequestParam Long siteId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
+    ) throws AccessDeniedException {
+
+        if (endDate.isBefore(startDate)) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        // ⚠️ nécessite que ScheduleRequest ait bien ces champs : periodType/startDate/endDate
+        ScheduleRequest req = ScheduleRequest.builder()
+                .name(null)
+                .siteId(siteId)
+                .periodType(Schedule.PeriodType.RANGE)
+                .startDate(startDate)
+                .endDate(endDate)
+                .build();
+
+        Schedule schedule = scheduleService.createOrRefresh(user, user.getCompany().getId(), req);
+        return ResponseEntity.ok(schedule);
     }
 
     /*  Liste filtrée                                                     */
@@ -155,9 +200,10 @@ public class ScheduleController {
     }
 
 
-    @PutMapping("/assignments/{id}")
+    @PutMapping("/{scheduleId}/assignments/{id}")
     public ResponseEntity<AssignmentDTO> updateAssignment(
             @AuthenticationPrincipal User me,
+            @PathVariable Long scheduleId,
             @PathVariable Long id,
             @Valid @RequestBody ScheduleAssignmentRequest request) throws AccessDeniedException {
 
@@ -168,12 +214,13 @@ public class ScheduleController {
 
 
     @GetMapping("/{id}/assignments")
-    public ResponseEntity<List<ScheduleAssignment>> getScheduleAssignments(
+    public ResponseEntity<List<AssignmentDTO>> getScheduleAssignments(
             @AuthenticationPrincipal User user,
             @PathVariable Long id) {
         Schedule schedule = scheduleService.getSchedule(user.getCompany().getId(), id);
         List<ScheduleAssignment> assignments = assignmentRepository.findByScheduleId(id);
-        return ResponseEntity.ok(assignments);
+        List<AssignmentDTO> dtos = assignments.stream().map(AssignmentDTO::of).toList();
+        return ResponseEntity.ok(dtos);
     }
 
 
@@ -281,6 +328,16 @@ public class ScheduleController {
         planningSendService.send(id, employeeId);
         return ResponseEntity.ok().build();
     }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteSchedule(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long id
+    ) throws AccessDeniedException {
+        scheduleService.deleteSchedule(user, user.getCompany().getId(), id);
+        return ResponseEntity.noContent().build();
+    }
+
 
 
 }

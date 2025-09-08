@@ -28,6 +28,11 @@ public record CompanyOverview(
 
     /** ✅ Nouvelle fabrique : utilise les compteurs remontés par les repositories */
     public static CompanyOverview of(Company c, long employeesCount, long sitesCount) {
+        double monthlyRevenue =
+                (c.getSubscriptionPlan() != null
+                        && c.getSubscriptionStatus() == Company.SubscriptionStatus.ACTIVE)
+                        ? c.getSubscriptionPlan().getPrice().doubleValue()   // <-- prix du plan
+                        : 0d;
         return new CompanyOverview(
                 c.getId(),
                 c.getName(),
@@ -35,7 +40,7 @@ public record CompanyOverview(
                 c.getSubscriptionPlan() != null ? c.getSubscriptionPlan().getId() : null,        // Long OK
                 c.getSubscriptionStatus() != null ? c.getSubscriptionStatus().name() : null,      // String OK
                 c.getSubscriptionPlan() != null ? c.getSubscriptionPlan().getName() : null,       // String OK
-                c.getMonthlyRevenue(),                                                             // double OK
+                monthlyRevenue,                                                             // double OK
                 employeesCount,
                 sitesCount,
                 c.getCreatedAt(),
@@ -43,4 +48,6 @@ public record CompanyOverview(
                 c.isActive()
         );
     }
+
+
 }

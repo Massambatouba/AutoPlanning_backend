@@ -1,5 +1,6 @@
 package org.makarimal.projet_gestionautoplanningsecure.repository;
 
+
 import org.makarimal.projet_gestionautoplanningsecure.dto.EmployeePlanningDTO;
 import org.makarimal.projet_gestionautoplanningsecure.model.AgentType;
 import org.makarimal.projet_gestionautoplanningsecure.model.Employee;
@@ -9,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 @Repository
@@ -67,17 +69,51 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
 
 
     @Query("""
-   SELECT new org.makarimal.projet_gestionautoplanningsecure.dto.EmployeePlanningDTO(
-              e.id,
-              CONCAT(e.firstName,' ', e.lastName)
-          )
-   FROM  Employee e
-   WHERE e.site.id = :siteId
-     AND e.isActive   = true
-""")
-    List<EmployeePlanningDTO> findActiveBySite(@Param("siteId") Long siteId);
+           select e
+             from Employee e
+            where e.site.id = :siteId
+              and e.isActive = true
+            order by e.lastName, e.firstName
+           """)
+    List<Employee> findActiveBySite(@Param("siteId") Long siteId);
 
     long countByCompany_Id(Long cid);
+
+    @Query("""
+     select e from Employee e
+     where e.site.id = :siteId
+     order by e.lastName, e.firstName
+  """)
+    List<Employee> findBySiteIdOrderByLastNameAsc(@Param("siteId") Long siteId);
+
+    @Query("""
+        select e
+        from Employee e
+        where e.company.id = :companyId
+          and (
+                :q is null or :q = '' or
+                lower(e.firstName) like lower(concat('%', :q, '%')) or
+                lower(e.lastName)  like lower(concat('%', :q, '%')) or
+                lower(coalesce(e.email, '')) like lower(concat('%', :q, '%'))
+          )
+          and e.id not in (
+            select ee.id
+            from Site s join s.employees ee
+            where s.id = :siteId
+          )
+        order by e.lastName, e.firstName
+        """)
+    List<Employee> searchCandidatesForSite(
+            @Param("companyId") Long companyId,
+            @Param("siteId")     Long siteId,
+            @Param("q")          String q
+    );
+
+
+
+
+
+
 }
 
 

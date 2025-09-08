@@ -34,71 +34,85 @@ public class AssignmentGenerator {
                 .orElseThrow(() -> new RuntimeException("Schedule not found"));
 
         Site site = schedule.getSite();
-        YearMonth ym = YearMonth.of(schedule.getYear(), schedule.getMonth());
-        int daysInMonth = ym.lengthOfMonth();
+
+        // 1) Déterminer la plage de dates à couvrir selon periodType
+        LocalDate start;
+        LocalDate end;
+        if (schedule.getPeriodType() == Schedule.PeriodType.RANGE) {
+            if (schedule.getStartDate() == null || schedule.getEndDate() == null) {
+                throw new IllegalStateException("RANGE schedule requires startDate & endDate");
+            }
+            start = schedule.getStartDate();
+            end   = schedule.getEndDate();
+        } else {
+            // par défaut: planning mensuel
+            Integer y = schedule.getYear();
+            Integer m = schedule.getMonth();
+            if (y == null || m == null) {
+                throw new IllegalStateException("MONTH schedule requires year & month");
+            }
+            YearMonth ym = YearMonth.of(y, m);
+            start = ym.atDay(1);
+            end   = ym.atEndOfMonth();
+        }
 
         List<WeeklyScheduleRule> rules = weeklyRuleRepo.findAllBySiteId(site.getId());
-
         if (rules.isEmpty()) throw new IllegalStateException("No weekly rules");
 
-        // ‼️ Repère des affectations déjà choisies mais pas encore persistées
-        //    clé = date, valeur = ids des employés déjà retenus ce jour-là
-        Map<LocalDate, Set<Long>> picked = new HashMap<>();
+        // (optionnel) si tu veux regénérer proprement la période :
+        // assignRepo.deleteByScheduleIdAndDateBetween(scheduleId, start, end);
 
+        // Suivi local des personnes déjà retenues par jour
+        Map<LocalDate, Set<Long>> picked = new HashMap<>();
         List<ScheduleAssignment> toSave = new ArrayList<>();
 
-        for (int d = 1; d <= daysInMonth; d++) {
-            LocalDate date = ym.atDay(d);
-            DayOfWeek dow  = date.getDayOfWeek();
-            picked.putIfAbsent(date, new HashSet<>());      // init
+        // 2) Boucle du start au end (inclus)
+        for (LocalDate d = start; !d.isAfter(end); d = d.plusDays(1)) {
+            final LocalDate day = d; // ← copie finale pour les lambdas
 
-            // toutes les règles de ce jour (on peut en avoir plusieurs)
+            DayOfWeek dow = day.getDayOfWeek();
+            picked.putIfAbsent(day, new HashSet<>());
+
             rules.stream()
                     .filter(r -> r.getDayOfWeek() == dow)
                     .forEach(rule -> rule.getAgents().forEach(agentRule -> {
 
-                        // 1. filtre par type d’agent
-                        List<Employee> pool = employeeRepo
-                                .findBySiteAndIsActiveTrueAndAgentTypesContaining(site, agentRule.getAgentType());
+                        // 1) pool d’employés éligibles
+                        List<Employee> pool = employeeRepo.findBySiteAndIsActiveTrueAndAgentTypesContaining(
+                                site, agentRule.getAgentType());
 
-                        // 2. retrait des employés déjà planifiés sur ce créneau
+                        // 2) filtres (dispo, déjà pris ce jour, préférences)
                         pool = pool.stream()
                                 .filter(emp ->
-                                        isAvailable(emp, date,
-                                                agentRule.getStartTime(),
-                                                agentRule.getEndTime())
-                                                /* déjà choisi pour cette journée ? */
-                                                && !picked.get(date).contains(emp.getId())
-                                                /* dépassement d’heures / préférences ? */
-                                                && respectsPreferences(emp, date,
-                                                agentRule.getStartTime(),
-                                                agentRule.getEndTime())
+                                        isAvailable(emp, day, agentRule.getStartTime(), agentRule.getEndTime()) &&
+                                                !picked.get(day).contains(emp.getId()) &&
+                                                respectsPreferences(emp, day, agentRule.getStartTime(), agentRule.getEndTime())
                                 )
                                 .collect(Collectors.toList());
 
-
                         if (pool.size() < agentRule.getRequiredCount()) {
-                            // Pas assez d’effectif, on log mais on continue
-                            log.warn("Pas assez d’{} pour {} {}", agentRule.getAgentType(), date, site.getName());
+                            log.warn("Pas assez d’{} pour {} {}", agentRule.getAgentType(), day, site.getName());
                             return;
                         }
 
-                        // 3. sélect° (round‑robin simple)
+                        // 3) sélection
                         Collections.shuffle(pool);
                         pool.subList(0, agentRule.getRequiredCount()).forEach(emp -> {
-                            picked.get(date).add(emp.getId());
-                            /* nouveau filtre anti-doublon  */
-                            if (assignRepo.existsByEmployeeIdAndDate(emp.getId(), date)) {
-                                return;                    // une vacation pour ce jour existe déjà → on ignore
+                            picked.get(day).add(emp.getId());
+
+                            if (assignRepo.existsByEmployeeIdAndDate(emp.getId(), day)) {
+                                return;
                             }
+
+                            int durMin = computeDuration(agentRule.getStartTime(), agentRule.getEndTime());
+
                             ScheduleAssignment sa = ScheduleAssignment.builder()
                                     .schedule(schedule)
                                     .employee(emp)
-                                    .date(date)
+                                    .date(day) // ← utilise la copie finale
                                     .startTime(agentRule.getStartTime())
                                     .endTime(agentRule.getEndTime())
-                                    .duration((int) Duration.between(agentRule.getStartTime(),
-                                            agentRule.getEndTime()).toMinutes())
+                                    .duration(durMin)
                                     .notes(agentRule.getNotes())
                                     .agentType(agentRule.getAgentType())
                                     .status(ScheduleAssignment.AssignmentStatus.PENDING)
@@ -108,11 +122,18 @@ public class AssignmentGenerator {
                     }));
         }
 
+
         assignRepo.saveAll(toSave);
     }
 
+    private int computeDuration(LocalTime start, LocalTime end) {
+        int mins = (int) Duration.between(start, end).toMinutes();
+        if (mins <= 0) mins += 24 * 60;
+        return mins;
+}
 
-    /** true si l'employee n’a aucune assignation chevauchant ce créneau */
+
+        /** true si l'employee n’a aucune assignation chevauchant ce créneau */
    /* private boolean isAvailable(Employee emp, LocalDate date, LocalTime start, LocalTime end) {
         return assignRepo.findByEmployeeId(emp.getId()).stream()
                 .noneMatch(a -> a.getDate().equals(date)

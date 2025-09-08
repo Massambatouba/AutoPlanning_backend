@@ -4,6 +4,7 @@ import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.makarimal.projet_gestionautoplanningsecure.dto.EmployeeAvailabilityRequest;
 import org.makarimal.projet_gestionautoplanningsecure.dto.EmployeePreferenceRequest;
+import org.makarimal.projet_gestionautoplanningsecure.dto.EmployeeRequest;
 import org.makarimal.projet_gestionautoplanningsecure.model.Employee;
 import org.makarimal.projet_gestionautoplanningsecure.model.EmployeeAvailability;
 import org.makarimal.projet_gestionautoplanningsecure.model.EmployeePreference;
@@ -65,7 +66,7 @@ public class EmployeeAvailabilityService {
     }
 
     @Transactional
-    public EmployeePreference updatePreferences(Long companyId, Long employeeId, EmployeePreferenceRequest request) {
+    public EmployeePreference updatePreferences(Long companyId, Long employeeId, EmployeeRequest.PreferenceRequest request) {
         Employee employee = employeeRepository.findById(employeeId)
                 .filter(e -> e.getCompany().getId().equals(companyId))
                 .orElseThrow(() -> new EntityNotFoundException("Employee not found"));
@@ -78,6 +79,7 @@ public class EmployeeAvailabilityService {
         preference.setPrefersDay(request.isPrefersDay());
         preference.setPrefersNight(request.isPrefersNight());
         preference.setNoPreference(request.isNoPreference());
+        preference.setCanWorkWeeks(request.isCanWorkWeeks());
         preference.setMinHoursPerDay(request.getMinHoursPerDay());
         preference.setMaxHoursPerDay(request.getMaxHoursPerDay());
         preference.setMinHoursPerWeek(request.getMinHoursPerWeek());
@@ -88,14 +90,60 @@ public class EmployeeAvailabilityService {
         return preferenceRepository.save(preference);
     }
 
-    public EmployeePreference getPreferences(Long companyId, Long employeeId) {
-        if (!employeeRepository.findById(employeeId)
-                .filter(e -> e.getCompany().getId().equals(companyId))
-                .isPresent()) {
-            throw new EntityNotFoundException("Employee not found");
-        }
+    // EmployeeAvailabilityService.java
 
-        return preferenceRepository.findByEmployeeId(employeeId)
-                .orElseThrow(() -> new EntityNotFoundException("Employee preferences not found"));
+    @Transactional
+    public EmployeePreference updatePreferences(Long companyId,
+                                                Long employeeId,
+                                                EmployeePreferenceRequest req) {
+        // on adapte vers l’autre DTO et on délègue
+        return updatePreferences(companyId, employeeId, toPrefReq(req));
     }
+
+
+    private static EmployeeRequest.PreferenceRequest toPrefReq(EmployeePreferenceRequest r) {
+        return new EmployeeRequest.PreferenceRequest(
+                r.isCanWorkWeekends(),
+                r.isCanWorkWeeks(),
+                r.isCanWorkNights(),
+                r.isPrefersDay(),
+                r.isPrefersNight(),
+                r.isNoPreference(),
+                r.getMinHoursPerDay(),
+                r.getMaxHoursPerDay(),
+                r.getMinHoursPerWeek(),
+                r.getMaxHoursPerWeek(),
+                r.getPreferredConsecutiveDays(),
+                r.getMinConsecutiveDaysOff()
+        );
+    }
+
+
+    public EmployeePreference getPreferences(Long companyId, Long employeeId) {
+        Employee employee = employeeRepository.findById(employeeId)
+                .filter(e -> e.getCompany().getId().equals(companyId))
+                .orElseThrow(() -> new EntityNotFoundException("Employee not found"));
+
+     /*   return preferenceRepository.findByEmployeeId(employeeId).orElseGet(() ->
+                EmployeePreference.builder()
+                        .employee(employee)
+                        .canWorkWeekends(true)
+                        .canWorkNights(true)
+                        .prefersDay(false)
+                        .prefersNight(false)
+                        .noPreference(true)
+                        .minHoursPerDay(0)
+                        .maxHoursPerDay(24)
+                        .minHoursPerWeek(0)
+                        .maxHoursPerWeek(999) // plafond large
+                        .preferredConsecutiveDays(0)
+                        .minConsecutiveDaysOff(0)
+                        .build()
+        );
+
+      */
+        return preferenceRepository.findByEmployeeId(employeeId)
+                .orElseGet(() -> EmployeePreference.builder().employee(employee).build());
+    }
+
 }

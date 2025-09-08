@@ -20,6 +20,10 @@ public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
 
     Optional<Schedule> findBySiteIdAndMonthAndYear(Long siteId, int month, int year);
 
+    Optional<Schedule> findBySiteIdAndPeriodTypeAndMonthAndYear(
+            Long siteId, Schedule.PeriodType periodType, Integer month, Integer year);
+
+
     @Query("""
         SELECT s
         FROM   Schedule s
@@ -68,4 +72,15 @@ public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
          where  s.company.id = :companyId
          """)
     Double findAverageCompletionRate(@Param("companyId") Long companyId);
+
+    Optional<Schedule> findBySiteIdAndPeriodTypeAndStartDateAndEndDate(
+            Long siteId, Schedule.PeriodType periodType, LocalDate startDate, LocalDate endDate);
+
+    @Query("""
+        select s from Schedule s
+        where s.site.id = :siteId
+          and s.periodType = org.makarimal.projet_gestionautoplanningsecure.model.Schedule$PeriodType.RANGE
+          and not (s.endDate < :from or s.startDate > :to)
+    """)
+    List<Schedule> findRangeOverlaps(Long siteId, LocalDate from, LocalDate to);
 }

@@ -8,6 +8,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.makarimal.projet_gestionautoplanningsecure.model.Schedule;
 
 @Data
 @Builder
@@ -19,12 +20,17 @@ public class ScheduleRequest {
     @NotNull(message = "Site ID is required")
     private Long siteId;
 
-    @NotNull(message = "Month is required")
+    private Schedule.PeriodType periodType;
+
+
     @Min(value = 1, message = "Month must be between 1 and 12")
     @Max(value = 12, message = "Month must be between 1 and 12")
     private Integer month;
 
-    @NotNull(message = "Year is required")
+    private java.time.LocalDate startDate;
+    private java.time.LocalDate endDate;
+
+
     @Min(value = 2024, message = "Year must be 2024 or later")
     private Integer year;
 }

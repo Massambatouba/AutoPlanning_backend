@@ -23,6 +23,9 @@ public class EmployeeService {
     private final SiteRepository       siteRepo;
     private final AuthServiceHelper    auth;
     private final EmployeeAbsenceRepository employeeAbsenceRepo;
+    private final EmployeeAvailabilityService employeeAvailabilityService;
+    private final EmployeeAvailabilityService availabilityService;
+
 
     /* ====================================================================== */
     /*  1.  CRUD                                                              */
@@ -186,7 +189,7 @@ public class EmployeeService {
         return employeeRepo.findBySiteIdAndIsActiveTrue(siteId);
     }
 
-    public List<EmployeePlanningDTO> getIsActiveEmployeesForSite(Long siteId) {
+    public List<Employee> getIsActiveEmployeesForSite(Long siteId) {
         return employeeRepo.findActiveBySite(siteId);
     }
 
@@ -253,6 +256,10 @@ public class EmployeeService {
         emp.setAgentTypes(new HashSet<>(req.getAgentTypes()));
 
         employeeRepo.save(emp);
+
+        if (req.getPreferences() != null) {
+            availabilityService.updatePreferences(emp.getCompany().getId(), emp.getId(), req.getPreferences());
+        }
         return toDto(emp);
     }
 

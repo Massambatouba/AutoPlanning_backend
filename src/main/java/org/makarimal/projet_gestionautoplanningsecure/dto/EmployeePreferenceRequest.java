@@ -18,6 +18,7 @@ public class EmployeePreferenceRequest {
     private boolean prefersDay;
     private boolean prefersNight;
     private boolean noPreference;
+    private boolean canWorkWeeks;
 
     @NotNull(message = "Minimum hours per day is required")
     @Min(value = 1, message = "Minimum hours per day must be at least 1")
@@ -42,3 +43,4 @@ public class EmployeePreferenceRequest {
     private Integer preferredConsecutiveDays;
     private Integer minConsecutiveDaysOff;
 }
+
